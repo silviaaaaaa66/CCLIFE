@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python / notebooks
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.ipynb
+
+# Incoming raw audio
+downloads/
+*.mp3
+*.wav
+*.wma
+*.m4a
+*.aac
+*.flac
+*.ogg
+
+# Processed/generated audio
+downloads/
+processed/
+add_bgm_files/temp/
+
+
+# BGM source files and extracted BGM
+add_bgm_files/季刊配乐.zip
+add_bgm_files/bgm/
+add_bgm_files/models/
+
+# Transcription scratch outputs
+add_bgm_files/transcripts/
