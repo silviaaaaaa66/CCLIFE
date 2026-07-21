@@ -2,10 +2,14 @@ import subprocess
 import os
 import re
 import json
+import tempfile
 import zipfile
-import urllib.error
-import urllib.request
 from env_loader import load_dotenv
+
+try:
+    import opencc
+except ImportError:
+    opencc = None
 
 
 load_dotenv()
@@ -28,11 +32,6 @@ TRANSCRIPTS_DIR = "add_bgm_files/transcripts"
 MUSIC_PROFILE_DIR = "add_bgm_files/music_profiles"
 MUSIC_PROMPT_PATH = os.path.join(MUSIC_PROFILE_DIR, "配乐分析提示词.md")
 MUSIC_PROFILE_CSV_PATH = os.path.join(MUSIC_PROFILE_DIR, "圣乐曲库画像_初版.csv")
-OPENAI_RECOMMENDATION_MODEL = os.getenv(
-    "OPENAI_RECOMMENDATION_MODEL",
-    "gpt-4.1-mini"
-)
-OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "120"))
 
 
 # ============================
@@ -70,15 +69,15 @@ def read_text_file(path, label):
         return f.read().strip()
 
 
-def require_openai_api_key():
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    if not api_key:
+def to_simplified_chinese(text):
+    if opencc is None:
         raise RuntimeError(
-            "OPENAI_API_KEY is required for devotional BGM recommendation"
+            "OpenCC is required for Chinese transcript normalization. "
+            "Install dependencies with: python3 -m pip install -r requirements.txt"
         )
 
-    return api_key
+    converter = opencc.OpenCC("t2s")
+    return converter.convert(text or "")
 
 
 def load_bgm_map():
@@ -151,34 +150,87 @@ def resolve_bgm_path(track_id=None, english_title=None):
     return output_path
 
 
+def convert_audio_for_whisper(file_path, seconds=None):
+    require_file(file_path, "Audio file")
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    fd, wav_path = tempfile.mkstemp(
+        prefix="whisper_",
+        suffix=".wav",
+        dir=TEMP_DIR,
+    )
+    os.close(fd)
+
+    cmd = ["ffmpeg", "-y", "-v", "error", "-i", file_path]
+    if seconds is not None:
+        cmd.extend(["-t", str(seconds)])
+    cmd.extend([
+        "-vn",
+        "-ac", "1",
+        "-ar", "16000",
+        "-c:a", "pcm_s16le",
+        wav_path,
+    ])
+
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
+        detail = (exc.stderr or "").strip()
+        raise RuntimeError(
+            f"Failed to convert audio for Whisper: {detail or file_path}"
+        ) from exc
+
+    return wav_path
+
+
 def transcribe_audio_intro(file_path, seconds=INTRO_DETECT_SECONDS):
     require_file(WHISPER_MODEL_PATH, "Whisper model")
+    wav_path = convert_audio_for_whisper(file_path, seconds)
 
     cmd = [
         "whisper-cli",
         "--no-gpu",
         "-m", WHISPER_MODEL_PATH,
-        "-f", file_path,
+        "-f", wav_path,
         "-l", "zh",
         "-d", str(seconds * 1000),
         "-nt",
         "-np",
     ]
 
-    result = subprocess.run(
-        cmd,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    finally:
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
 
-    return result.stdout.strip()
+    transcript = result.stdout.strip()
+    if not transcript:
+        detail = (result.stderr or "").strip()
+        raise RuntimeError(
+            f"Whisper returned an empty transcript: {detail or file_path}"
+        )
+
+    return to_simplified_chinese(transcript)
 
 
 def transcribe_full_audio(file_path, output_dir=TRANSCRIPTS_DIR):
     require_file(WHISPER_MODEL_PATH, "Whisper model")
     os.makedirs(output_dir, exist_ok=True)
+    wav_path = convert_audio_for_whisper(file_path)
 
     output_base = os.path.join(output_dir, f"{safe_stem(file_path)}_raw")
     output_txt = output_base + ".txt"
@@ -187,168 +239,38 @@ def transcribe_full_audio(file_path, output_dir=TRANSCRIPTS_DIR):
         "whisper-cli",
         "--no-gpu",
         "-m", WHISPER_MODEL_PATH,
-        "-f", file_path,
+        "-f", wav_path,
         "-l", "zh",
         "-otxt",
         "-nt",
         "-of", output_base,
     ]
 
-    subprocess.run(
-        cmd,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    finally:
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
 
     with open(output_txt, "r", encoding="utf-8") as f:
-        transcript = f.read().strip()
+        transcript = to_simplified_chinese(f.read().strip())
+
+    if not transcript:
+        detail = (result.stderr or "").strip()
+        raise RuntimeError(
+            f"Whisper returned an empty transcript: {detail or file_path}"
+        )
+
+    with open(output_txt, "w", encoding="utf-8") as f:
+        f.write(transcript)
 
     return output_txt, transcript
-
-
-def devotional_recommendation_schema():
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "track_id": {
-                "type": "string",
-                "description": "曲库中的曲目编号，例如 A7-09 或 N-06。"
-            },
-            "chinese_title": {
-                "type": "string",
-                "description": "首选配乐中文名称。"
-            },
-            "english_title": {
-                "type": "string",
-                "description": "首选配乐英文名称，必须能对应曲库或 zip 文件名。"
-            },
-            "album_title": {
-                "type": "string",
-                "description": "专辑名称。"
-            },
-            "track_number": {
-                "type": "string",
-                "description": "专辑内曲目序号。"
-            },
-            "article_core": {
-                "type": "string",
-                "description": "文章核心，不超过120字。"
-            },
-            "theological_focus": {
-                "type": "string",
-                "description": "主要神学重心，不超过80字。"
-            },
-            "devotional_tone": {
-                "type": "string",
-                "description": "灵修气质，不超过80字。"
-            },
-            "reason": {
-                "type": "string",
-                "description": "选择这首曲目的最终理由，不超过180字。"
-            },
-            "not_recommended": {
-                "type": "array",
-                "maxItems": 2,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "title": {"type": "string"},
-                        "reason": {"type": "string"}
-                    },
-                    "required": ["title", "reason"]
-                }
-            }
-        },
-        "required": [
-            "track_id",
-            "chinese_title",
-            "english_title",
-            "album_title",
-            "track_number",
-            "article_core",
-            "theological_focus",
-            "devotional_tone",
-            "reason",
-            "not_recommended"
-        ]
-    }
-
-
-def extract_openai_response_text(response_data):
-    if response_data.get("output_text"):
-        return response_data["output_text"]
-
-    for output_item in response_data.get("output", []):
-        for content_item in output_item.get("content", []):
-            if content_item.get("type") in ["output_text", "text"]:
-                text = content_item.get("text")
-                if text:
-                    return text
-
-    raise RuntimeError("OpenAI response did not include output text")
-
-
-def call_openai_for_recommendation(system_text, user_text):
-    api_key = require_openai_api_key()
-
-    payload = {
-        "model": OPENAI_RECOMMENDATION_MODEL,
-        "input": [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": system_text
-                    }
-                ]
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": user_text
-                    }
-                ]
-            }
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "devotional_bgm_recommendation",
-                "strict": True,
-                "schema": devotional_recommendation_schema()
-            }
-        }
-    }
-
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(
-            request,
-            timeout=OPENAI_TIMEOUT_SECONDS
-        ) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI recommendation failed: {error_body}") from e
-
-    response_text = extract_openai_response_text(response_data)
-    return json.loads(response_text)
 
 
 def validate_recommendation(recommendation):
@@ -358,13 +280,16 @@ def validate_recommendation(recommendation):
         "english_title",
         "album_title",
         "track_number",
+        "article_core",
+        "theological_focus",
+        "devotional_tone",
         "reason",
     ]
 
     for field in required_fields:
         if not recommendation.get(field):
             raise RuntimeError(
-                f"OpenAI recommendation missing required field: {field}"
+                f"Codex recommendation missing required field: {field}"
             )
 
 
@@ -413,7 +338,7 @@ def save_recommendation_files(source_audio_path, recommendation, bgm_path):
     data = {
         **recommendation,
         "bgm_path": bgm_path,
-        "model": OPENAI_RECOMMENDATION_MODEL,
+        "selection_method": "codex",
     }
 
     with open(json_path, "w", encoding="utf-8") as f:
@@ -425,40 +350,9 @@ def save_recommendation_files(source_audio_path, recommendation, bgm_path):
     return json_path, md_path
 
 
-def recommend_bgm_for_devotional(transcript_text):
-    prompt_text = read_text_file(MUSIC_PROMPT_PATH, "BGM prompt")
-    profile_csv = read_text_file(MUSIC_PROFILE_CSV_PATH, "Music profile CSV")
-
-    system_text = (
-        "你是生命季刊灵修文章配乐分析助手。"
-        "你必须只从提供的圣乐曲库画像中选择唯一一首最合适的背景圣乐。"
-        "不要按关键词机械匹配；先理解文章核心、神学重心和灵修气质，"
-        "再比较曲库。只输出符合 schema 的 JSON。"
-    )
-
-    user_text = f"""## 配乐分析提示词
-{prompt_text}
-
-## 圣乐曲库画像 CSV
-{profile_csv}
-
-## 今日灵修朗读转写文本
-{transcript_text}
-"""
-
-    recommendation = call_openai_for_recommendation(system_text, user_text)
+def process_devotional_audio(input_path, recommendation):
+    """Mix devotional audio after Codex has selected its BGM."""
     validate_recommendation(recommendation)
-
-    return recommendation
-
-
-def process_devotional_audio(input_path):
-    require_openai_api_key()
-
-    transcript_path, transcript = transcribe_full_audio(input_path)
-    print(f"Transcribed devotional audio: {transcript_path}")
-
-    recommendation = recommend_bgm_for_devotional(transcript)
     bgm_path = resolve_bgm_path(
         track_id=recommendation["track_id"],
         english_title=recommendation["english_title"],
@@ -474,7 +368,11 @@ def process_devotional_audio(input_path):
     print(f"Saved recommendation: {json_path}")
     print(f"Saved recommendation summary: {md_path}")
 
-    return process_audio_with_bgm(input_path, bgm_path)
+    return process_audio_with_bgm(
+        input_path,
+        bgm_path,
+        bgm_chinese_title=recommendation["chinese_title"],
+    )
 
 
 def classify_audio_task(subject="", file_path=""):
@@ -581,6 +479,7 @@ def process_audio_with_bgm(
     bgm_path=DEVOTIONAL_BGM_PATH,
     temp_dir=TEMP_DIR,
     processed_dir=PROCESSED_DIR,
+    bgm_chinese_title=None,
 ):
 
     filename = os.path.basename(input_path)
@@ -597,9 +496,14 @@ def process_audio_with_bgm(
     concat_txt = os.path.join(temp_dir, f"{base_name}_concat.txt")
     temp_files = [intro_wav, middle_wav, outro_wav, concat_txt]
 
+    output_base_name = base_name
+    if bgm_chinese_title:
+        safe_bgm_title = clean_filename(bgm_chinese_title).strip("+")
+        output_base_name = f"{base_name}-{safe_bgm_title}"
+
     output_path = os.path.join(
         processed_dir,
-        base_name + "_processed.mp3"
+        output_base_name + "_processed.mp3"
     )
 
     try:
@@ -707,17 +611,26 @@ def process_audio_with_bgm(
 # 总入口
 # ============================
 
-def process_audio(input_path, subject=""):
+def process_audio(input_path, subject="", recommendation=None):
     task_type = classify_audio_task(subject, input_path)
 
     if task_type == "devotional":
         print("BGM needed: devotional")
-        return process_devotional_audio(input_path)
+        if recommendation is None:
+            raise RuntimeError(
+                "Devotional audio needs a Codex selection. "
+                "Use batch_audio.py prepare, then batch_audio.py run."
+            )
+        return process_devotional_audio(input_path, recommendation)
 
     if task_type == "family":
         print("BGM needed: family")
         require_file(FAMILY_BGM_PATH, "Family BGM")
-        return process_audio_with_bgm(input_path, FAMILY_BGM_PATH)
+        return process_audio_with_bgm(
+            input_path,
+            FAMILY_BGM_PATH,
+            bgm_chinese_title="奇异恩典",
+        )
 
     print("No BGM needed")
     return process_audio_normal(input_path)

@@ -35,3 +35,6 @@ add_bgm_files/models/
 
 # Transcription scratch outputs
 add_bgm_files/transcripts/
+
+# Local batch state (contains source/transcript paths and selections)
+batch_jobs/
