@@ -29,7 +29,7 @@ def save_manifest(manifest):
 
 def load_manifest():
     if not os.path.exists(MANIFEST_PATH):
-        raise RuntimeError("No pending batch. Run: python3 batch_audio.py prepare")
+        raise RuntimeError("No pending batch. Run: python3 batch_audio.py process")
 
     with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -63,7 +63,7 @@ def prepare_batch():
     files = audio_files()
     if not files:
         print("No audio files found.")
-        return
+        return None
 
     entries = []
     for path in files:
@@ -97,6 +97,27 @@ def prepare_batch():
     save_manifest(manifest)
     print(f"Prepared {len(entries)} audio file(s): {MANIFEST_PATH}")
     print_status(manifest)
+    return manifest
+
+
+def process_batch():
+    manifest = prepare_batch()
+    if manifest is None:
+        return
+
+    devotional_entries = [
+        entry for entry in manifest["entries"]
+        if entry["task_type"] == "devotional"
+    ]
+    if devotional_entries:
+        print(
+            f"Found {len(devotional_entries)} devotional audio file(s). "
+            "Codex selection is required before processing and sending."
+        )
+        return
+
+    print("No devotional audio found. Processing and sending this batch now.")
+    run_batch()
 
 
 def print_status(manifest=None):
@@ -197,12 +218,19 @@ def run_batch():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Two-stage Codex audio batch workflow")
-    parser.add_argument("command", choices=["prepare", "status", "apply", "run"])
+    parser = argparse.ArgumentParser(
+        description="Conditional Codex audio batch workflow"
+    )
+    parser.add_argument(
+        "command",
+        choices=["process", "prepare", "status", "apply", "run"],
+    )
     parser.add_argument("path", nargs="?", help="Selections JSON path for the apply command")
     args = parser.parse_args()
 
-    if args.command == "prepare":
+    if args.command == "process":
+        process_batch()
+    elif args.command == "prepare":
         prepare_batch()
     elif args.command == "status":
         print_status()

@@ -1,8 +1,8 @@
-from batch_audio import prepare_batch
+from batch_audio import process_batch
 
 
 def main():
-    prepare_batch()
+    process_batch()
 
 
 
