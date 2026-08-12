@@ -1,7 +1,10 @@
 import os
 
+from .config import PROJECT_ROOT
 
-def load_dotenv(path=".env"):
+
+def load_dotenv(path=None):
+    path = path or PROJECT_ROOT / ".env"
     if not os.path.exists(path):
         return
 
@@ -17,4 +20,3 @@ def load_dotenv(path=".env"):
             value = value.strip().strip('"').strip("'")
 
             os.environ.setdefault(key, value)
-

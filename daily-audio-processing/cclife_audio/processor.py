@@ -4,7 +4,23 @@ import re
 import json
 import tempfile
 import zipfile
-from env_loader import load_dotenv
+
+from .config import (
+    BGM_DIR,
+    BGM_MAP_PATH,
+    DEVOTIONAL_BGM_PATH,
+    FAMILY_BGM_PATH,
+    MUSIC_PROFILE_CSV_PATH,
+    MUSIC_PROFILE_DIR,
+    MUSIC_PROMPT_PATH,
+    MUSIC_ZIP_PATH,
+    PROCESSED_DIR,
+    PROJECT_ROOT,
+    TEMP_DIR,
+    TRANSCRIPTS_DIR,
+    WHISPER_MODEL_PATH,
+)
+from .env_loader import load_dotenv
 
 try:
     import opencc
@@ -19,19 +35,7 @@ load_dotenv()
 # BGM配置
 # ============================
 
-DEVOTIONAL_BGM_PATH = "add_bgm_files/bgm/Breathe_on_Me_Breath_of_God.mp3"
-FAMILY_BGM_PATH = "add_bgm_files/bgm/Amazing_Grace.wma"
-TEMP_DIR = "add_bgm_files/temp"
-PROCESSED_DIR = "processed"
-WHISPER_MODEL_PATH = "add_bgm_files/models/ggml-small.bin"
 INTRO_DETECT_SECONDS = 5
-BGM_DIR = "add_bgm_files/bgm"
-BGM_MAP_PATH = "add_bgm_files/bgm_map.json"
-MUSIC_ZIP_PATH = "add_bgm_files/季刊配乐.zip"
-TRANSCRIPTS_DIR = "add_bgm_files/transcripts"
-MUSIC_PROFILE_DIR = "add_bgm_files/music_profiles"
-MUSIC_PROMPT_PATH = os.path.join(MUSIC_PROFILE_DIR, "配乐分析提示词.md")
-MUSIC_PROFILE_CSV_PATH = os.path.join(MUSIC_PROFILE_DIR, "圣乐曲库画像_初版.csv")
 
 
 # ============================
@@ -128,6 +132,8 @@ def resolve_bgm_path(track_id=None, english_title=None):
     for key in [track_id, english_title]:
         if key and key in bgm_map:
             path = bgm_map[key]
+            if not os.path.isabs(path):
+                path = os.path.join(PROJECT_ROOT, path)
             if os.path.exists(path):
                 return path
 
@@ -440,10 +446,10 @@ def process_audio_normal(input_path):
     filename = os.path.basename(input_path)
     clean_name = clean_filename(filename)
 
-    os.makedirs("processed", exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
 
     output_path = os.path.join(
-        "processed",
+        PROCESSED_DIR,
         clean_name.rsplit(".", 1)[0] + "_processed.mp3"
     )
 
@@ -619,7 +625,7 @@ def process_audio(input_path, subject="", recommendation=None):
         if recommendation is None:
             raise RuntimeError(
                 "Devotional audio needs a Codex selection. "
-                "Use batch_audio.py prepare, then batch_audio.py run."
+                "Complete the pending batch with Codex."
             )
         return process_devotional_audio(input_path, recommendation)
 
@@ -684,7 +690,7 @@ if __name__ == "__main__":
 
     test_files = [
         (
-            "downloads/test.mp3",
+            os.path.join(PROJECT_ROOT, "runtime", "downloads", "test.mp3"),
             "test_msg_id",
             "今日灵修 测试"
         )

@@ -4,7 +4,8 @@ import os
 import re
 from email.header import decode_header
 from datetime import datetime, timedelta
-from env_loader import load_dotenv
+from .config import DOWNLOAD_DIR
+from .env_loader import load_dotenv
 
 
 load_dotenv()
@@ -64,7 +65,7 @@ def clean_filename(filename):
 # ----------------------------
 # 主函数
 # ----------------------------
-def fetch_audio_attachments(download_dir="downloads", mark_seen=True):
+def fetch_audio_attachments(download_dir=DOWNLOAD_DIR, mark_seen=True):
     os.makedirs(download_dir, exist_ok=True)
 
     email_address = require_env("CCLIFE_EMAIL")

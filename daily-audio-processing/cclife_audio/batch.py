@@ -3,8 +3,14 @@ import json
 import os
 from datetime import datetime, timezone
 
-from email_sender import send_email
-from processor import (
+from .config import (
+    BATCH_DIR,
+    DOWNLOAD_DIR,
+    MUSIC_PROFILE_CSV_PATH,
+    MUSIC_PROMPT_PATH,
+)
+from .email_sender import send_email
+from .processor import (
     FAMILY_BGM_PATH,
     classify_audio_task,
     process_audio_normal,
@@ -15,8 +21,6 @@ from processor import (
 )
 
 
-DOWNLOAD_DIR = "downloads"
-BATCH_DIR = "batch_jobs"
 MANIFEST_PATH = os.path.join(BATCH_DIR, "pending.json")
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".wma", ".aac", ".flac", ".ogg"}
 
@@ -29,13 +33,14 @@ def save_manifest(manifest):
 
 def load_manifest():
     if not os.path.exists(MANIFEST_PATH):
-        raise RuntimeError("No pending batch. Run: python3 batch_audio.py process")
+        raise RuntimeError("No pending batch. Run: python3 main.py --local")
 
     with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def audio_files():
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     files = []
     for filename in sorted(os.listdir(DOWNLOAD_DIR)):
         path = os.path.join(DOWNLOAD_DIR, filename)
@@ -88,8 +93,8 @@ def prepare_batch():
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "selection_instructions": {
-            "prompt": "add_bgm_files/music_profiles/配乐分析提示词.md",
-            "catalog": "add_bgm_files/music_profiles/圣乐曲库画像_初版.csv",
+            "prompt": MUSIC_PROMPT_PATH,
+            "catalog": MUSIC_PROFILE_CSV_PATH,
             "method": "Codex reads the full prompt, catalog, and every transcript, then fills recommendation.",
         },
         "entries": entries,

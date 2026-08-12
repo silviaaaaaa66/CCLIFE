@@ -1,6 +1,6 @@
 import unittest
 
-from processor import to_simplified_chinese
+from cclife_audio.processor import to_simplified_chinese
 
 
 class TranscriptNormalizationTests(unittest.TestCase):

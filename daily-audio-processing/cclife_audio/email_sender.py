@@ -1,7 +1,7 @@
 import smtplib
 from email.message import EmailMessage
 import os
-from env_loader import load_dotenv
+from .env_loader import load_dotenv
 
 
 load_dotenv()

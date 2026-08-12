@@ -12,8 +12,17 @@ __pycache__/
 .ipynb_checkpoints/
 *.ipynb
 
-# Incoming raw audio
-downloads/
+# Local runtime data
+runtime/downloads/
+runtime/processed/
+runtime/batch_jobs/
+runtime/temp/
+runtime/transcripts/
+runtime/bgm/
+runtime/models/
+runtime/季刊配乐.zip
+
+# Audio files outside runtime/ are also local by default
 *.mp3
 *.wav
 *.wma
@@ -21,20 +30,3 @@ downloads/
 *.aac
 *.flac
 *.ogg
-
-# Processed/generated audio
-downloads/
-processed/
-add_bgm_files/temp/
-
-
-# BGM source files and extracted BGM
-add_bgm_files/季刊配乐.zip
-add_bgm_files/bgm/
-add_bgm_files/models/
-
-# Transcription scratch outputs
-add_bgm_files/transcripts/
-
-# Local batch state (contains source/transcript paths and selections)
-batch_jobs/

@@ -821,7 +821,7 @@ ${albumRows
   .join("\n")}
 `;
 
-const outDir = path.join(process.cwd(), "outputs", "music_profiles");
+const outDir = path.join(process.cwd(), "resources", "music_profiles");
 await fs.mkdir(outDir, { recursive: true });
 await fs.writeFile(path.join(outDir, "圣乐曲库画像_初版.csv"), csv, "utf8");
 await fs.writeFile(path.join(outDir, "圣乐曲库画像_初版.md"), md, "utf8");
