@@ -280,6 +280,9 @@ def transcribe_full_audio(file_path, output_dir=TRANSCRIPTS_DIR):
 
 
 def validate_recommendation(recommendation):
+    if not isinstance(recommendation, dict):
+        raise RuntimeError("Codex recommendation must be a JSON object")
+
     required_fields = [
         "track_id",
         "chinese_title",
@@ -297,6 +300,25 @@ def validate_recommendation(recommendation):
             raise RuntimeError(
                 f"Codex recommendation missing required field: {field}"
             )
+
+    not_recommended = recommendation.get("not_recommended")
+    if not isinstance(not_recommended, list):
+        raise RuntimeError(
+            "Codex recommendation field not_recommended must be a JSON array"
+        )
+
+    for index, item in enumerate(not_recommended):
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                "Codex recommendation field "
+                f"not_recommended[{index}] must be a JSON object"
+            )
+        for field in ("title", "reason"):
+            if not item.get(field):
+                raise RuntimeError(
+                    "Codex recommendation field "
+                    f"not_recommended[{index}] missing required field: {field}"
+                )
 
 
 def format_recommendation_markdown(recommendation, bgm_path):
